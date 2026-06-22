@@ -66,8 +66,36 @@ ec_sync_info_t slave0_syncs[]=
 
 ec_pdo_entry_info_t drive_pdo_entry[TOTAL_NUM_OF_PDOS]=
 {
-
     //RxPDO
-    {0x6040, 0x00, 16}, //control word}
-    {}
+    {0x6040, 0x00, 16},   //control word
+    {0x607a, 0x00, 32},   //Target Postion
+    {0x60ff, 0x00, 32},   //Target Velocity
+    {0x6071, 0x00, 16},  //Target Torque  -‰ rated torque
+    {0x6060, 0x00, 8},   //Mode of operation //Operation mode   
+
+    //TxPDO
+    {0x6041, 0x00, 16}, /* Status Word */
+    {0x6064, 0x00, 32}, /* Actual position */
+    {0x606c, 0x00, 32}, /* Actual velocity */
+    {0x6077, 0x00, 16}, //"Torque actual value"
+    {0x2600, 0x00, 32},//Digital Inputs
+    {0x6061, 0x00, 8}, /* Operation mode display */
+    
+};
+
+ec_pdo_info_t drive_pdo[2]=
+{
+    {0x1600,5, drive_pdo_entry+0},
+    {0x1A00,6, drive_pdo_entry+5}
+
+};
+
+
+ec_sync_info_t drive_syncs[5]=
+{
+    {0, EC_DIR_OUTPUT,0,NULL,EC_WD_DISABLE},
+    {1, EC_DIR_INPUT,0,NULL,EC_WD_DISABLE},
+    {2, EC_DIR_OUTPUT,1,drive_pdo,EC_WD_ENABLE},
+    {3, EC_DIR_INPUT,1,drive_pdo+1, EC_WD_DISABLE},
+    {0xff}
 };
