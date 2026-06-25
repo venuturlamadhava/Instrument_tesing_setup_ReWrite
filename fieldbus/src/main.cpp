@@ -259,28 +259,31 @@ void check_drive_state(int i) {
 // ============================================================
 // Warm-up: run cycles to let DC lock before main loop
 // ============================================================
-void warmup_dc_sync() {
-    std::cout << "Warming up DC sync (" << WARMUP_CYCLES << " cycles)..." << std::endl;
+
+void warmup_dc_sync()
+{
+    std::cout << "warming up DC sync(" << WARMUP_CYCLES <<"cycles)" << std::endl;
 
     struct timespec warmup_time;
     clock_gettime(CLOCK_MONOTONIC, &warmup_time);
 
-    for (int i = 0; i < WARMUP_CYCLES && running; i++) {
-        warmup_time.tv_nsec += CYCLE_TIME_NS;
-        while (warmup_time.tv_nsec >= 1000000000) {
-            warmup_time.tv_nsec -= 1000000000;
-            warmup_time.tv_sec++;
+    for(int i=0; i<WARMUP_CYCLES && running; i++)
+    {
+        warmup_time.tv_nsec +=CYCLE_TIME_NS;
+        while(warmup_time.tv_nsec >=1000000000)
+        {
+            warmup_time.tv_nsec-= 1000000000;
+            warmup_time.tv_nsec++;
         }
         clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &warmup_time, NULL);
 
         ecrt_master_receive(master);
         ecrt_domain_process(domain);
 
-        // DC sync
+        //DC sync
         struct timespec tn;
         clock_gettime(CLOCK_MONOTONIC, &tn);
-        ecrt_master_application_time(master,
-            tn.tv_sec * 1000000000ULL + tn.tv_nsec);
+        ecrt_master_application_time(master, tn.tv_sec*1000000000ULL + tn.tv_nsec);
         ecrt_master_sync_reference_clock(master);
         ecrt_master_sync_slave_clocks(master);
 
@@ -288,15 +291,41 @@ void warmup_dc_sync() {
         ecrt_master_send(master);
     }
 
-    // Print state after warm-up
+    //Print state after warm-up
     check_master_state();
     check_domain_state();
     check_slave0_state();
-    for (int i = 0; i < NUM_OF_DRIVES; i++) {
+    for(int i=0; i<NUM_OF_DRIVES; i++)
+    {
         check_drive_state(i);
     }
-    std::cout << "Warm-up complete." << std::endl;
+
+    std::cout <<"warm-up complete." <<std::endl;
 }
+
+//======================================================
+//Cyclic task (main loop)
+//======================================================
+
+void cyclic_task()
+{
+    clock_gettime(CLOCK_MONOTONIC, &wakeup_time);
+
+    while(running)
+    {
+        wakeup_time.tv_nsec += CYCLE_TIME_NS;
+        while (wakeup_time.tv_nsec >= 1000000000)
+        {
+            wakeup_time.tv_nsec -= 1000000000;
+            wakeup_time.tv_nsec++;
+        }
+        clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &wakeup_time, NULL);
+    
+        ecrt_master_receive(master);
+        ecrt_domain_process(domain);
+    }
+}
+
 
 
 
