@@ -29,7 +29,7 @@ DriveData Drive_data[NUM_OF_DRIVES];
 
 //To Access Shared memory
 SharedMemory fieldbus_shared_m;
-SharedData* data = nullptr;
+SharedData *data = nullptr;
 
 static bool all_drives_op=false;
 static RfidState rfid_state =RfidState::WAIT_OP;
@@ -323,8 +323,170 @@ void cyclic_task()
     
         ecrt_master_receive(master);
         ecrt_domain_process(domain);
+
+        // check states every ~1 second
+        check_domain_state();
+        counter++;
+        if(counter > 100)
+        {
+            counter = 0;
+            check_master_state();
+            check_slave0_state();
+
+            for(int i=0; i<NUM_OF_DRIVES; i++)
+            {
+                check_drive_state(i);
+            }
+            if(all_drives_op)
+            {
+                for(int i=0; i<NUM_OF_DRIVES;i++)
+                {
+                    ec_slave_config_state_t sc;
+                    ecrt_slave_config_state(Drive_data[i].sc_slave_config,&sc);
+                    if(!sc.operational)
+                    {
+                        all_drives_op=false;
+                        std::cout<<"Drive"<< i+1 << " lost OP.Pausing shm exchange" << std::endl;
+                        fieldbus_shared_m.lock();
+                        data->all_drives_op =false;
+                        fieldbus_shared_m.unlock();
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                bool all_op = true;
+                for(int i=0; i<NUM_OF_DRIVES; i++)
+                {
+                    ec_slave_config_state_t sc;
+                    ecrt_slave_config_state(Drive_data[i].sc_slave_config, &sc);
+                    if(!sc.operational)
+                    {
+                        all_op=false;
+                        break;
+                    }
+                }
+                if(all_op)
+                {
+                    all_drives_op=true;
+                    std::cout<<"All Drives operational - Starting shm exchange"<< std::endl;
+                }
+        
+            }
+        }
+
+        //------------Slave 0 (RFID) - read status, run state machine, write commands-----
+
+        {
+            //(1)Always read fresh status from PDO
+            uint8_t sw= sc0_state.operational ? EC_READ_U8(domain_pd + off_slave0_status_word) : 0;
+            
+            //(2) Default ouput each cycle (idle bus)
+            uint8_t CW_out = 0;
+            uint8_t header_out =0;
+
+            //(3) State machine
+
+            if(!sc0_state.operational)
+            {
+                rfid_state=RfidState::WAIT_OP;
+            }
+            else {
+                switch (rfid_state)
+                {
+                case RfidState::WAIT_OP:
+                //slave just become OP -> start detection
+                rfid_state = RfidState :: SEND_DETECT;
+                break;
+
+                case RfidState::SEND_DETECT:
+                header_out = 26;            //detect header
+                rfid_state = RfidState::WAIT_PRESENT;
+                break;
+
+                case RfidState::WAIT_PRESENT:
+                header_out = 26;            //hold header arresrted
+                if(sw== 128)
+                {
+                    rfid_state = RfidState::SEND_READ_65;
+                }
+                break;
+
+                case RfidState::SEND_READ_65:
+                header_out = 26;
+                CW_out = 65;
+                settle_cycles = 0;
+                rfid_state = RfidState::WAIT_DATA;
+                break;
+
+                case RfidState::WAIT_DATA:{
+                header_out = 26;
+                CW_out = 65;
+                settle_cycles++;
+                uint8_t hdr_in = EC_READ_U8(domain_pd + off_slave0_header_in);
+                uint8_t itype_in = EC_READ_U8(domain_pd + off_slave0_instrument_type_in);
+
+                if(hdr_in == 170 && itype_in !=0)
+                {
+                    //Latch right here - same sample we validated
+                    fieldbus_shared_m.lock();
+                    data -> rfid_status.instrument_id = itype_in;
+                    fieldbus_shared_m.unlock();
+                    rfid_state = RfidState::SEND_ACK;
+                }
+                else if(settle_cycles >= 1000)
+                {
+                    std::cout << "RFID: timeout, retrying" << std::endl;
+                    rfid_state = RfidState::SEND_DETECT; 
+                }
+            }
+                break;
+                
+                case RfidState::SEND_ACK:
+                header_out = 26;
+                CW_out = 4;
+                rfid_state = RfidState::WAIT_READY;
+                break;
+
+                case RfidState::WAIT_READY:
+                header_out = 26;
+                CW_out = 4;
+                if(sw == 128)
+                {
+                    rfid_state = RfidState::DONE;
+                }
+                break;
+
+                case RfidState::DONE:
+                    header_out = 26;
+
+                    if(sw != 128)
+                    {
+                        fieldbus_shared_m.lock();
+                        data->rfid_status.instrument_id = 0; //clear stale ID
+                        fieldbus_shared_m.unlock();
+                        std::cout << "RFID: Instrument removed -> re- detecting" << std::endl;
+                        rfid_state =RfidState::SEND_DETECT;
+                    }
+                    break;
+
+
+
+
+
+            }
+            
+
+
+
+
+                }
+            }
+
+        }
     }
-}
+
 
 
 
